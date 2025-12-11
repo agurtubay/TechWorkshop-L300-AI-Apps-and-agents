@@ -1,0 +1,54 @@
+name: Build and push to Azure Container Registry
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create .env from secret (do not print secrets)
+        run: |
+          mkdir -p src
+          # Write the secret to src/.env without printing it to logs
+          printf '%s' "${{ secrets.ENV }}" > src/.env
+          chmod 600 src/.env
+
+      - name: Log in to Azure Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./src
+          file: ./src/Dockerfile
+          push: true
+          tags: ${{ secrets.ACR_REGISTRY }}/my-app:${{ github.sha }},${{ secrets.ACR_REGISTRY }}/my-app:latest
+
+      - name: Remove .env from runner
+        run: |
+          # try to securely delete the temporary .env file from the runner
+          shred -u src/.env || rm -f src/.env
+
+# Notes:
+# - This workflow only uses files under src/ as the Docker build context (context: ./src).
+# - You must create the following repository secrets: ACR_REGISTRY (e.g. myregistry.azurecr.io), ACR_USERNAME, ACR_PASSWORD, and ENV (the contents of your .env).  Alternatively you can replace the login step with azure/login + az acr login using AZURE_CREDENTIALS if you prefer OIDC.
+# - This workflow writes the ENV secret into src/.env at build time, builds the image using the src/ context (so only files in src/ go into the image), pushes to your ACR, and then removes the temporary .env from the runner.  The .env file is never committed to the repository by this workflow.
