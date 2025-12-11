@@ -2,18 +2,6 @@
 # - Triggers on changes to any agent initializer, any prompt, or the shared tool.
 # - Detects which agent initializers are affected and runs them in parallel using a matrix.
 # - Uses a single repository secret AZURE_CREDENTIALS (JSON Service Principal) for Azure login.
-#
-# Advantages of this single workflow with dynamic matrix:
-# - No duplication of install / login steps in multiple workflow files.
-# - Only runs the agent(s) that actually changed (saves runtime and cost).
-# - If the shared tool (src/app/tools/discountLogic.py) changes, it runs ALL agents.
-#
-# Alternative approaches:
-# - Five separate workflows: simpler files, easier to reason about triggers per-agent, and fully separate logs. But more duplicated YAML to maintain.
-# - A reusable workflow (workflow_call) plus tiny per-agent trigger workflows: great for DRYing configuration across repos or teams that want explicit per-agent triggers.
-#
-# I recommend this dynamic single workflow (below) for maintainability and to avoid duplication,
-# while still running only the agents that need it.
 on:
   push:
     paths:
@@ -62,67 +50,67 @@ jobs:
         id: set_outputs
         run: |
           python - <<'PY'
-import os, subprocess, json, glob, re, sys
+            import os, subprocess, json, glob, re, sys
 
-diff_range = os.environ.get("DIFF_RANGE")
-if not diff_range:
-    print("No DIFF_RANGE set, exiting with no agents.")
-    agents = []
-else:
-    # Get changed files for the specified range
-    try:
-        out = subprocess.check_output(["git", "diff", "--name-only", diff_range], stderr=subprocess.DEVNULL).decode().strip()
-    except subprocess.CalledProcessError:
-        out = ""
-    changed_files = [line.strip() for line in out.splitlines() if line.strip()]
+            diff_range = os.environ.get("DIFF_RANGE")
+            if not diff_range:
+                print("No DIFF_RANGE set, exiting with no agents.")
+                agents = []
+            else:
+                # Get changed files for the specified range
+                try:
+                    out = subprocess.check_output(["git", "diff", "--name-only", diff_range], stderr=subprocess.DEVNULL).decode().strip()
+                except subprocess.CalledProcessError:
+                    out = ""
+                changed_files = [line.strip() for line in out.splitlines() if line.strip()]
 
-    # Normalize paths
-    changed = set(changed_files)
+                # Normalize paths
+                changed = set(changed_files)
 
-    # Path to the shared tool that should trigger all agents
-    tool_path = "src/app/tools/discountLogic.py"
+                # Path to the shared tool that should trigger all agents
+                tool_path = "src/app/tools/discountLogic.py"
 
-    # Gather all agent initializer basenames (without .py)
-    agent_files = glob.glob("src/app/agents/*_initializer.py")
-    all_agents = [ os.path.splitext(os.path.basename(p))[0] for p in agent_files ]
+                # Gather all agent initializer basenames (without .py)
+                agent_files = glob.glob("src/app/agents/*_initializer.py")
+                all_agents = [ os.path.splitext(os.path.basename(p))[0] for p in agent_files ]
 
-    agents_set = set()
+                agents_set = set()
 
-    if tool_path in changed:
-        # If the tool changed, run all agents.
-        agents_set.update(all_agents)
-    else:
-        # Add agents whose initializer file changed
-        for f in changed:
-            if f.startswith("src/app/agents/") and f.endswith("_initializer.py"):
-                agents_set.add(os.path.splitext(os.path.basename(f))[0])
-        # If a prompt changed, try to find the matching agent initializer.
-        # Example prompt filename: CustomerLoyaltyAgentPrompt.txt  -> base 'CustomerLoyaltyAgentPrompt' -> strip 'Prompt' -> candidate 'CustomerLoyaltyAgent'
-        for f in changed:
-            if f.startswith("src/prompts/") and f.endswith("Prompt.txt"):
-                base = os.path.splitext(os.path.basename(f))[0]
-                if base.lower().endswith("prompt"):
-                    candidate = base[:-6]  # remove 'Prompt' suffix
+                if tool_path in changed:
+                    # If the tool changed, run all agents.
+                    agents_set.update(all_agents)
                 else:
-                    candidate = base
-                # Match candidate to any agent initializer filename (case-insensitive substring match)
-                for agent in all_agents:
-                    if candidate.lower() in agent.lower():
-                        agents_set.add(agent)
-                        break
+                    # Add agents whose initializer file changed
+                    for f in changed:
+                        if f.startswith("src/app/agents/") and f.endswith("_initializer.py"):
+                            agents_set.add(os.path.splitext(os.path.basename(f))[0])
+                    # If a prompt changed, try to find the matching agent initializer.
+                    # Example prompt filename: CustomerLoyaltyAgentPrompt.txt  -> base 'CustomerLoyaltyAgentPrompt' -> strip 'Prompt' -> candidate 'CustomerLoyaltyAgent'
+                    for f in changed:
+                        if f.startswith("src/prompts/") and f.endswith("Prompt.txt"):
+                            base = os.path.splitext(os.path.basename(f))[0]
+                            if base.lower().endswith("prompt"):
+                                candidate = base[:-6]  # remove 'Prompt' suffix
+                            else:
+                                candidate = base
+                            # Match candidate to any agent initializer filename (case-insensitive substring match)
+                            for agent in all_agents:
+                                if candidate.lower() in agent.lower():
+                                    agents_set.add(agent)
+                                    break
 
-    agents = sorted(list(agents_set))
-# Write outputs to GITHUB_OUTPUT so other jobs can consume them
-out_path = os.environ.get("GITHUB_OUTPUT")
-if not out_path:
-    # fallback to printing json (will not be captured as outputs)
-    print("GITHUB_OUTPUT not available; agents:", json.dumps(agents))
-    sys.exit(0)
-with open(out_path, "a") as f:
-    f.write(f"agents={json.dumps(agents)}\n")
-    f.write(f"count={len(agents)}\n")
-print(f"Detected agents: {agents}")
-PY
+                agents = sorted(list(agents_set))
+            # Write outputs to GITHUB_OUTPUT so other jobs can consume them
+            out_path = os.environ.get("GITHUB_OUTPUT")
+            if not out_path:
+                # fallback to printing json (will not be captured as outputs)
+                print("GITHUB_OUTPUT not available; agents:", json.dumps(agents))
+                sys.exit(0)
+            with open(out_path, "a") as f:
+                f.write(f"agents={json.dumps(agents)}\n")
+                f.write(f"count={len(agents)}\n")
+            print(f"Detected agents: {agents}")
+          PY
 
   run-agents:
     name: Run affected agent(s)
@@ -132,10 +120,8 @@ PY
     strategy:
       fail-fast: false
       matrix:
-        # Build matrix from JSON array produced by detect_changes job
         agent: ${{ fromJson(needs.detect_changes.outputs.agents) }}
     env:
-      # AZURE_CREDENTIALS should be a JSON blob stored in repository secrets.
       AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
     steps:
       - name: Checkout repository (required in each matrix job)
@@ -178,36 +164,34 @@ PY
         run: |
           echo "${{ secrets.AZURE_CREDENTIALS }}" > sp.json
           python - <<'PY' > /tmp/env_out
-import json,sys,os
-with open('sp.json') as f:
-    data = json.load(f)
-mapping = {
-    'clientId': 'AZURE_CLIENT_ID',
-    'client_id': 'AZURE_CLIENT_ID',
-    'clientSecret': 'AZURE_CLIENT_SECRET',
-    'client_secret': 'AZURE_CLIENT_SECRET',
-    'tenantId': 'AZURE_TENANT_ID',
-    'tenant_id': 'AZURE_TENANT_ID',
-    'subscriptionId': 'AZURE_SUBSCRIPTION_ID',
-    'subscription_id': 'AZURE_SUBSCRIPTION_ID',
-    'projectEndpoint': 'AZURE_PROJECT_ENDPOINT',
-    'project_endpoint': 'AZURE_PROJECT_ENDPOINT'
-}
-lines = []
-for key, envname in mapping.items():
-    if key in data and data[key] is not None:
-        val = str(data[key]).replace('\n','\\n')
-        lines.append(f"{envname}={val}")
-# Print to stdout (captured to /tmp/env_out by the shell redirection)
-print("\n".join(lines))
-PY
-          # Append parsed variables to GITHUB_ENV
+            import json,sys,os
+            with open('sp.json') as f:
+                data = json.load(f)
+            mapping = {
+                'clientId': 'AZURE_CLIENT_ID',
+                'client_id': 'AZURE_CLIENT_ID',
+                'clientSecret': 'AZURE_CLIENT_SECRET',
+                'client_secret': 'AZURE_CLIENT_SECRET',
+                'tenantId': 'AZURE_TENANT_ID',
+                'tenant_id': 'AZURE_TENANT_ID',
+                'subscriptionId': 'AZURE_SUBSCRIPTION_ID',
+                'subscription_id': 'AZURE_SUBSCRIPTION_ID',
+                'projectEndpoint': 'AZURE_PROJECT_ENDPOINT',
+                'project_endpoint': 'AZURE_PROJECT_ENDPOINT'
+            }
+            lines = []
+            for key, envname in mapping.items():
+                if key in data and data[key] is not None:
+                    val = str(data[key]).replace('\\n','\\\\n')
+                    lines.append(f"{envname}={val}")
+            print("\\n".join(lines))
+          PY
           cat /tmp/env_out >> $GITHUB_ENV || true
 
       - name: Add src to PYTHONPATH
         run: echo "PYTHONPATH=src" >> $GITHUB_ENV
 
-      - name: Sanity check: azure.ai.projects importable
+      - name: Sanity check:azure.ai.projects importable
         run: python -c "import importlib; importlib.import_module('azure.ai.projects'); print('azure.ai.projects import OK')"
 
       - name: Run agent initializer
