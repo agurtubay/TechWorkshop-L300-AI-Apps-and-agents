@@ -30,6 +30,7 @@ PROMPT_PATH = os.path.join(project_root, 'prompts', 'DiscountLogicPrompt.txt')
 with open(PROMPT_PATH, 'r') as file:
     PROMPT = file.read()
 
+
 @trace_function()
 def calculate_discount(CustomerID):
     print(f"calculate_discount function:{CustomerID}")
